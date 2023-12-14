@@ -1,87 +1,148 @@
-/**
- * Un main avec quelques exemples pour vous aider. Vous pouvez
- * bien entendu modifier ce fichier comme bon vous semble.
- **/
-
 #include <stdio.h>
-#include <inttypes.h>
-#include <signal.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <string.h>
 
-#include "imgdist.h"
+#define PORT 8101
+#define MAX_SIZE 20480 // 20KB, limit of image size
+#define BACKLOG 5
 
-void ExempleSignaux(void);
+// Structure to pass information to the thread
+typedef struct {
+    int csock;
+    struct sockaddr_in client_addr;
+} ThreadArgs;
 
-int main(int argc, char* argv[]) {
-   
-   /// Exemple d'utilisation de la biliothèque img-dist ///
-   uint64_t hash1, hash2;
-   
-   // Calcule du code de hachage perceptif de l'image "img/1.bmp" et
-   // conservation de celui-ci dans hash1.
-   if (!PHash("img/1.bmp", &hash1))
-      return 1; // Échec dans le chargement de l'image (message sur stderr automatique)
-   
-   // Idem pour "img/2.bmp".
-   if (!PHash("img/2.bmp", &hash2))
-      return 1;
-   
-   // Calculer la distance entre hash1 et hash2
-   unsigned int distance = DistancePHash(hash1, hash2);
-   
-   // Afficher la distance entre les deux images (valeur de retour d'img-dist dans le projet 1
-   // quand il n'y avait pas d'erreur).
-   printf("Distance entre les images 'img/1.bmp' et 'img/2.bmp' : %d\n", distance);
-   
-   /// Fin de l'exemple d'utilisation de la biliothèque img-dist ///
-   
-   /// Exemple gestion de signaux (cf Annexe de l'énoncé & corrigé du projet 1) ///
-   
-   ExempleSignaux();
-   
-   /// ///
-   
-   
-   
-   return 0;
+// Function to handle a connected client
+void *handleClient(void *arg) {
+    ThreadArgs *threadArgs = (ThreadArgs *)arg;
+
+    // Access client socket: threadArgs->csock
+    // Access client address: threadArgs->client_addr
+
+    // Send a welcome message to the client
+    const char *welcomeMessage = "Welcome to the server! Please send an image.\n";
+    send(threadArgs->csock, welcomeMessage, strlen(welcomeMessage), 0);
+
+    while (1) {
+        // Receive image data from the client and save it based on the client socket
+        char filename[255];
+        sprintf(filename, "received_image_%d.bmp", threadArgs->csock);
+        FILE *file = fopen(filename, "wb");
+
+        if (file == NULL) {
+            perror("Error opening file for writing");
+            close(threadArgs->csock);
+            free(threadArgs);
+            pthread_exit(NULL);
+        }
+
+        char buffer[MAX_SIZE];
+        ssize_t bytesRead;
+
+        while ((bytesRead = recv(threadArgs->csock, buffer, sizeof(buffer), 0)) > 0) {
+            fwrite(buffer, 1, bytesRead, file);
+        }
+
+        fclose(file);
+        printf("File received and saved as %s\n", filename);
+
+        // Send a success message to the client
+        const char *successMessage = "Image received successfully! Send another image or type 'exit' to close the connection.\n";
+        send(threadArgs->csock, successMessage, strlen(successMessage), 0);
+
+        // Check if the client wants to exit
+        char exitCommand[5];
+        bytesRead = recv(threadArgs->csock, exitCommand, sizeof(exitCommand), 0);
+        if (bytesRead > 0 && strncmp(exitCommand, "exit", 4) == 0) {
+            break;
+        }
+    }
+
+    // Close the client socket
+    printf("Closing the client socket %d\n", threadArgs->csock);
+    close(threadArgs->csock);
+    free(threadArgs);
+    pthread_exit(NULL);
 }
 
-static volatile sig_atomic_t signalRecu = 0;
-void SignalHandler(int sig) {
-   signalRecu = 1;
+int main(void) {
+    int sock, csock;
+    struct sockaddr_in sin, csin;
+    socklen_t recsize = sizeof(sin);
+    socklen_t crecsize = sizeof(csin);
+    int sock_err;
+
+    // Create a socket
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (sock == -1) {
+        perror("Error creating socket");
+        exit(EXIT_FAILURE);
+    }
+
+    // Configure the connection
+    sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    sin.sin_family = AF_INET;
+    sin.sin_port = htons(PORT);
+
+    // Bind the socket
+    sock_err = bind(sock, (struct sockaddr *)&sin, recsize);
+
+    if (sock_err == -1) {
+        perror("Error binding socket");
+        close(sock);
+        exit(EXIT_FAILURE);
+    }
+
+    // Start listening
+    sock_err = listen(sock, BACKLOG);
+
+    if (sock_err == -1) {
+        perror("Error listening for connections");
+        close(sock);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server listening on port %d...\n", PORT);
+
+    while (1) {
+        // Accept incoming connections
+        printf("Waiting for a client to connect...\n");
+        csock = accept(sock, (struct sockaddr *)&csin, &crecsize);
+
+        if (csock == -1) {
+            perror("Error accepting connection");
+            close(sock);
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Client connected with socket %d from %s:%d\n", csock, inet_ntoa(csin.sin_addr), ntohs(csin.sin_port));
+
+        // Create a thread to handle the client
+        pthread_t thread;
+        ThreadArgs *threadArgs = malloc(sizeof(*threadArgs));
+        threadArgs->csock = csock;
+        threadArgs->client_addr = csin;
+
+        if (pthread_create(&thread, NULL, handleClient, (void *)threadArgs) != 0) {
+            perror("Error creating thread");
+            close(csock);
+            free(threadArgs);
+        } else {
+            pthread_detach(thread);
+        }
+    }
+
+    // Close the server socket (this part is never reached in this example)
+    printf("Closing the server socket\n");
+    close(sock);
+
+    return EXIT_SUCCESS;
 }
 
-void ExempleSignaux(void) {
-   /// Exemple gestion de signaux (cf Annexe de l'énoncé & corrigé du projet 1) ///
-   
-   // Forcer l'interruption des appels systèmes lors de la réception de SIGINT
-   struct sigaction action;
-   action.sa_handler = SignalHandler;
-   sigemptyset(&action.sa_mask);
-
-   if (sigaction(SIGINT, &action, NULL) < 0) {
-      perror("sigaction()");
-      return;
-   }
-   
-   
-   // Gestion idéale (court et sans risque d'accès concurrents) d'un signal
-   // (cf SignalHandler() également).
-   printf("Signal recu : %d.\n", signalRecu);
-   raise(SIGINT);
-   printf("Signal recu : %d.\n", signalRecu);
-   
-   
-   // Bloquer des signaux pour le thread courant
-   sigset_t set;
-    
-   sigemptyset(&set);        // Ensemble vide de signaux
-   sigaddset(&set, SIGINT);  // Ajouter le signal SIGINT
-   sigaddset(&set, SIGUSR1); // Ajouter le signal SIGUSR1
-    
-   if (pthread_sigmask(SIG_BLOCK, &set, NULL) != 0) {
-      perror("pthread_sigmask()");
-      return;
-   }
-   
-   /// ///
-}
