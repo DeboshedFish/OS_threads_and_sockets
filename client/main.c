@@ -8,7 +8,7 @@
 #include <string.h>
 #include <signal.h>
 
-#define PORT 8101
+#define PORT 5555
 #define MAX_SIZE 20480 // 20KB, limit of image size
 
 int sock; // Declare the socket as a global variable for signal handling
