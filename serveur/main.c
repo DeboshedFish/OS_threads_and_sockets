@@ -8,7 +8,7 @@
 #include <pthread.h>
 #include <string.h>
 
-#define PORT 8101
+#define PORT 5555
 #define MAX_SIZE 20480 // 20KB, limit of image size
 #define BACKLOG 5
 
