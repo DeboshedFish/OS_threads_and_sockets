@@ -29,6 +29,8 @@ void *handleClient(void *arg) {
     const char *welcomeMessage = "Welcome to the server! Please send an image.\n";
     send(threadArgs->csock, welcomeMessage, strlen(welcomeMessage), 0);
 
+
+    // !!! PROBLEME 
     while (1) {
         // Receive image data from the client and save it based on the client socket
         char filename[255];
@@ -56,6 +58,10 @@ void *handleClient(void *arg) {
         const char *successMessage = "Image received successfully! Send another image or type 'exit' to close the connection.\n";
         send(threadArgs->csock, successMessage, strlen(successMessage), 0);
 
+
+        // !!! COMPARISON
+        //compare(filename);
+    
         // Check if the client wants to exit
         char exitCommand[5];
         bytesRead = recv(threadArgs->csock, exitCommand, sizeof(exitCommand), 0);
@@ -69,6 +75,57 @@ void *handleClient(void *arg) {
     close(threadArgs->csock);
     free(threadArgs);
     pthread_exit(NULL);
+}
+
+// prints the distance, and name of the image with the shortest distacne
+// parity is meant to split the effort between different threads. We split it into three groups depending on the remainder modulo 3
+// (raw_image_name, parity)
+void* compare(const char* raw_image_name){
+	
+	printf("IT IS WORKING");
+	
+	uint64_t raw_hash, db_hash;
+	int raw_result, db_result;
+	int final_result = 10000;
+	const char* dbimg_name = NULL;
+	const char* best_name = NULL;
+
+
+	
+	if (PHashRaw(raw_image_name, MAX_SIZE, &raw_hash)){
+		int raw_result = raw_hash;
+	} else {
+		perror("Error couldn't hash raw image");
+	}
+	
+	// increment it by three
+	for (int dbimg_nb = 1; dbimg_nb < 102; dbimg_nb++){
+		
+		char nb_to_str[4];
+		sprintf(nb_to_str, "%d", dbimg_nb);
+		
+		char suffix[] = ".bmp";
+		
+		// concatenate to obtain nb.bmp
+		char result[7];
+		sprintf(dbimg_name, "%s%s", nb_to_str, suffix);
+		
+		if (PHash(dbimg_name, &db_hash)){
+			int db_result = db_hash;
+		} else {
+			perror("Error couldn't hash database image");
+		}
+		
+		
+		int distance = DistancePHash(raw_result, db_result);
+		if (final_result < distance) {
+			final_result = distance;
+			best_name = dbimg_name;
+			
+		}
+	}
+	printf("Most similar image found: %s with a distance of %d.\n", best_name, final_result);
+	return NULL;
 }
 
 int main(void) {
