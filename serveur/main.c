@@ -47,7 +47,7 @@ void *handleClient(void *arg) {
         char buffer[MAX_SIZE];
         ssize_t bytesRead;
 
-        while ((bytesRead = recv(threadArgs->csock, buffer, sizeof(buffer), 0)) > 0) {
+        if ((bytesRead = recv(threadArgs->csock, buffer, sizeof(buffer), 0)) > 0) {
             fwrite(buffer, 1, bytesRead, file);
         }
 
