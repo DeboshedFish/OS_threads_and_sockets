@@ -18,6 +18,138 @@ typedef struct {
     struct sockaddr_in client_addr;
 } ThreadArgs;
 
+bool readImage(const char *filename, char **imageData, size_t *imageSize) {
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("Error opening file for reading");
+        return false;
+    }
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    *imageSize = ftell(file);
+    rewind(file);
+
+    // Allocate memory for image data
+    *imageData = (char *)malloc(*imageSize);
+    if (*imageData == NULL) {
+        perror("Error allocating memory for image data");
+        fclose(file);
+        return false;
+    }
+
+    // Read image data from file
+    size_t bytesRead = fread(*imageData, 1, *imageSize, file);
+    if (bytesRead != *imageSize) {
+        perror("Error reading image data");
+        free(*imageData);
+        fclose(file);
+        return false;
+    }
+
+    fclose(file);
+    return true;
+}
+bool readImage(const char *filename, char **imageData, size_t *imageSize) {
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("Error opening file for reading");
+        return false;
+    }
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    *imageSize = ftell(file);
+    rewind(file);
+
+    // Allocate memory for image data
+    *imageData = (char *)malloc(*imageSize);
+    if (*imageData == NULL) {
+        perror("Error allocating memory for image data");
+        fclose(file);
+        return false;
+    }
+
+    // Read image data from file
+    size_t bytesRead = fread(*imageData, 1, *imageSize, file);
+    if (bytesRead != *imageSize) {
+        perror("Error reading image data");
+        free(*imageData);
+        fclose(file);
+        return false;
+    }
+
+    fclose(file);
+    return true;
+}
+
+	
+void* compare(const char* raw_image_name) {
+    printf("IT IS WORKING\n");
+
+    if (raw_image_name != NULL) {
+        printf("raw_image_name: %s\n", raw_image_name);
+
+        char *imageData;
+        size_t imageSize;
+
+        if (readImage(raw_image_name, &imageData, &imageSize)) {
+            uint64_t raw_hash;
+            int raw_result;
+            
+            if (PHashRaw(imageData, imageSize, &raw_hash)) {
+                raw_result = raw_hash;
+                fprintf("raw_result: %i", raw_result);
+
+                // Continue with the rest of the code...
+            } else {
+                fprintf(stderr, "Error couldn't hash raw image\n");
+            }
+
+            // Don't forget to free the allocated memory
+            free(imageData);
+        } else {
+            fprintf(stderr, "Error reading image data\n");
+        }
+    } else {
+        printf("raw_image_name is NULL\n");
+    }
+	
+	/*
+	 
+    // increment it by three
+    for (int dbimg_nb = 1; dbimg_nb < 102; dbimg_nb++) {
+        char nb_to_str[4];
+        sprintf(nb_to_str, "%d", dbimg_nb);
+
+        char suffix[] = ".bmp";
+
+        // concatenate to obtain nb.bmp
+        char result[7];
+        sprintf(dbimg_name, "%s%s", nb_to_str, suffix);
+
+        if (PHash(dbimg_name, &db_hash)){
+            db_result = db_hash;
+        } else {
+            perror("Error couldn't hash database image");
+        }
+
+        int distance = DistancePHash(raw_result, db_result);
+        if (final_result < distance) {
+            final_result = distance;
+            best_name = dbimg_name;
+        }
+    }
+    printf("Most similar image found: %s with a distance of %d.\n", best_name, final_result);
+    printf("IT IS WORKING\n");
+    
+    */
+    
+    return NULL;
+   
+}
+
+
 // Function to handle a connected client
 void *handleClient(void *arg) {
     ThreadArgs *threadArgs = (ThreadArgs *)arg;
@@ -77,56 +209,7 @@ void *handleClient(void *arg) {
     pthread_exit(NULL);
 }
 
-// prints the distance, and name of the image with the shortest distacne
-// parity is meant to split the effort between different threads. We split it into three groups depending on the remainder modulo 3
-// (raw_image_name, parity)
-void* compare(const char* raw_image_name){
-	
-	printf("IT IS WORKING");
-	
-	uint64_t raw_hash, db_hash;
-	int raw_result, db_result;
-	int final_result = 10000;
-	const char* dbimg_name = NULL;
-	const char* best_name = NULL;
 
-
-	
-	if (PHashRaw(raw_image_name, MAX_SIZE, &raw_hash)){
-		int raw_result = raw_hash;
-	} else {
-		perror("Error couldn't hash raw image");
-	}
-	
-	// increment it by three
-	for (int dbimg_nb = 1; dbimg_nb < 102; dbimg_nb++){
-		
-		char nb_to_str[4];
-		sprintf(nb_to_str, "%d", dbimg_nb);
-		
-		char suffix[] = ".bmp";
-		
-		// concatenate to obtain nb.bmp
-		char result[7];
-		sprintf(dbimg_name, "%s%s", nb_to_str, suffix);
-		
-		if (PHash(dbimg_name, &db_hash)){
-			int db_result = db_hash;
-		} else {
-			perror("Error couldn't hash database image");
-		}
-		
-		
-		int distance = DistancePHash(raw_result, db_result);
-		if (final_result < distance) {
-			final_result = distance;
-			best_name = dbimg_name;
-			
-		}
-	}
-	printf("Most similar image found: %s with a distance of %d.\n", best_name, final_result);
-	return NULL;
-}
 
 int main(void) {
     int sock, csock;
