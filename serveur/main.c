@@ -85,7 +85,7 @@ bool readImage(const char *filename, char **imageData, size_t *imageSize) {
 
 	
 void* compare(const char* raw_image_name) {
-    printf("IT IS WORKING\n");
+    printf("On entre dans la fonction compare\n");
 
     if (raw_image_name != NULL) {
         printf("raw_image_name: %s\n", raw_image_name);
@@ -162,11 +162,10 @@ void *handleClient(void *arg) {
     send(threadArgs->csock, welcomeMessage, strlen(welcomeMessage), 0);
 
 
-    // !!! PROBLEME 
     while (1) {
         // Receive image data from the client and save it based on the client socket
         char filename[255];
-        sprintf(filename, "received_image_%d.bmp", threadArgs->csock);
+        sprintf(filename, "serveur/received_image_%d.bmp", threadArgs->csock);
         FILE *file = fopen(filename, "wb");
 
         if (file == NULL) {
@@ -175,24 +174,28 @@ void *handleClient(void *arg) {
             free(threadArgs);
             pthread_exit(NULL);
         }
+        
 
         char buffer[MAX_SIZE];
         ssize_t bytesRead;
-
-        if ((bytesRead = recv(threadArgs->csock, buffer, sizeof(buffer), 0)) > 0) {
-            fwrite(buffer, 1, bytesRead, file);
-        }
+        
+		if ((bytesRead = recv(threadArgs->csock, buffer, sizeof(buffer), 0)) > 0) {
+			fwrite(buffer, 1, bytesRead, file);
+		}
+	 
 
         fclose(file);
         printf("File received and saved as %s\n", filename);
 
+	// !!! COMPARISON
+        printf("BEFORE COMPARISON\n");
+        compare(&filename);
+        printf("AFTER COMPARISON");
+		
         // Send a success message to the client
         const char *successMessage = "Image received successfully! Send another image or type 'exit' to close the connection.\n";
         send(threadArgs->csock, successMessage, strlen(successMessage), 0);
-
-
-        // !!! COMPARISON
-        //compare(filename);
+        
     
         // Check if the client wants to exit
         char exitCommand[5];
@@ -209,6 +212,9 @@ void *handleClient(void *arg) {
     pthread_exit(NULL);
 }
 
+// prints the distance, and name of the image with the shortest distacne
+// parity is meant to split the effort between different threads. We split it into three groups depending on the remainder modulo 3
+// (raw_image_name, parity)
 
 
 int main(void) {
@@ -263,7 +269,8 @@ int main(void) {
         }
 
         printf("Client connected with socket %d from %s:%d\n", csock, inet_ntoa(csin.sin_addr), ntohs(csin.sin_port));
-
+        
+        
         // Create a thread to handle the client
         pthread_t thread;
         ThreadArgs *threadArgs = malloc(sizeof(*threadArgs));
@@ -285,4 +292,5 @@ int main(void) {
 
     return EXIT_SUCCESS;
 }
+
 
