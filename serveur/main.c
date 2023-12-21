@@ -147,11 +147,11 @@ void *handleClient(void *arg) {
             //const char *successMessage = "Image received successfully! Send another image or type 'exit' to close the connection.\n";
             //send(threadArgs->csock, successMessage, strlen(successMessage), 0);
 
-            char exitCommand[5];
-            bytesRead = recv(threadArgs->csock, exitCommand, sizeof(exitCommand), 0);
-            if (bytesRead > 0 && strncmp(exitCommand, "exit", 4) == 0) {
-                break;  // Terminate the connection if the client sends "exit"
-            }
+            //char exitCommand[5];
+            //bytesRead = recv(threadArgs->csock, exitCommand, sizeof(exitCommand), 0);
+            //if (bytesRead > 0 && strncmp(exitCommand, "exit", 4) == 0) {
+           //     break;  // Terminate the connection if the client sends "exit"
+           // }
         }
     }
 
