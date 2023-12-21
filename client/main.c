@@ -29,7 +29,7 @@ void receiveMessage(int sock) {
 
     if (bytesRead > 0) {
         message[bytesRead] = '\0';
-        printf("Server says: %s", message);
+        printf("%s", message);
     } else {
         perror("Error receiving message");
         exit(EXIT_FAILURE);
@@ -48,21 +48,24 @@ void sendFile(int sock, const char *image_name) {
     int bytesReadFile;
 
     while ((bytesReadFile = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        send(sock, buffer, bytesReadFile, 0);
+        if (send(sock, buffer, bytesReadFile, 0) == -1) {
+            perror("Error sending file");
+            fclose(file);
+            return;
+        }
     }
 
     fclose(file);
 
     // Receive a success message from the server
-    char successMessage[1024];
-    ssize_t bytesRead = recv(sock, successMessage, sizeof(successMessage), 0);
+    receiveMessage(sock);
+}
 
-    if (bytesRead > 0) {
-        successMessage[bytesRead] = '\0';
-        printf("Server says: %s", successMessage);
-    } else {
-        perror("Error receiving success message");
-    }
+// Function to close the connection gracefully
+void closeConnection() {
+    printf("Closing the connection.\n");
+    close(sock);
+    exit(EXIT_SUCCESS);
 }
 
 int main(void) {
@@ -84,16 +87,23 @@ int main(void) {
 
     // Connect to the server
     if (connect(sock, (struct sockaddr *)&sin, sizeof(sin)) != -1) {
-        char image_name[255];
         // Welcome from server
-	receiveMessage(sock);
+        //receiveMessage(sock);
+
         while (1) {
-            printf("Enter the name of the image to send example (img/2.bmp): ");
+            char image_name[255];
+            printf("Enter the name of the image to send (or 'exit' to close): ");
             fgets(image_name, sizeof(image_name), stdin);
             image_name[strlen(image_name) - 1] = '\0'; // Remove the '\n' character at the end
 
             if (strcmp(image_name, "exit") == 0) {
-                break; // Exit the loop if the user enters 'exit'
+                closeConnection();
+            }
+
+            // Check if the file exists
+            if (access(image_name, F_OK) == -1) {
+                printf("File '%s' does not exist. Please enter a valid file.\n", image_name);
+                continue;
             }
 
             // Send the image to the server
@@ -101,7 +111,7 @@ int main(void) {
         }
 
         // Close the connection
-        close(sock);
+        closeConnection();
     } else {
         perror("Error connecting to the server");
         exit(EXIT_FAILURE);
