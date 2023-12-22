@@ -30,7 +30,8 @@ typedef struct {
     int threadIndex;
     int totalImages;
     uint64_t rawHash;
-    int csock;
+    int localBestDistance;
+    char localBestImage[MAX_FILENAME_LENGTH];
 } ThreadArgs;
 
 void handleSignal(int signum) {
@@ -45,12 +46,10 @@ void *imageProcessingThread(void *arg) {
     int startIndex = threadArgs->threadIndex * threadArgs->totalImages;
     int endIndex = startIndex + threadArgs->totalImages - 1;
     uint64_t raw_hash = threadArgs->rawHash;
-    int csock = threadArgs->csock;
 
-    int localBestDistance = DISTANCE_THRESHOLD;
-    char localBestImage[MAX_FILENAME_LENGTH];
-    
-    printf("Entering db for loop");
+    threadArgs->localBestDistance = DISTANCE_THRESHOLD;
+
+    printf("Entering db for loop\n");
     for (int i = startIndex; i <= endIndex; ++i) {
         char dbimg_name[MAX_FILENAME_LENGTH];
         snprintf(dbimg_name, sizeof(dbimg_name), "img/%d.bmp", i);
@@ -58,75 +57,70 @@ void *imageProcessingThread(void *arg) {
         uint64_t db_hash;
         if (PHash(dbimg_name, &db_hash)) {
             int distance = DistancePHash(raw_hash, db_hash);
-            // printf("image number %d has a distance of %d from raw image\n", i, distance);
-            if (localBestDistance > distance) {
-				printf("Current closest image is number %d at a distance of %d from raw image\n", i, localBestDistance);
-                localBestDistance = distance;
-                strcpy(localBestImage, dbimg_name);
-            } 
+            pthread_mutex_lock(&memoLock);
+            if (threadArgs->localBestDistance > distance) {
+                printf("Current closest image is number %d at a distance of %d from raw image\n", i, threadArgs->localBestDistance);
+                threadArgs->localBestDistance = distance;
+                strcpy(threadArgs->localBestImage, dbimg_name);
+            }
+            pthread_mutex_unlock(&memoLock);
         } else {
             perror("Error hashing database image");
         }
     }
-
-    // Update the global best result
-    pthread_mutex_lock(&memoLock);
-    if (localBestDistance < bestDistance) {
-        bestDistance = localBestDistance;
-        strcpy(bestImage, localBestImage);
-        
-    }
-    pthread_mutex_unlock(&memoLock);
-        
-	if (bestDistance < DISTANCE_THRESHOLD) {
-		printf("Min distance found\n");
-		char resultMessage[MAX_SIZE];
-		snprintf(resultMessage, sizeof(resultMessage), "Most similar image found: '%s' with a distance of %d.\n", bestImage, bestDistance);
-		send(csock, resultMessage, strlen(resultMessage), 0);
-	} else {
-		const char *noSimilarImageMessage = "No similar image found (no comparison could be performed successfully).\n";
-		send(csock, noSimilarImageMessage, strlen(noSimilarImageMessage), 0);
-	}
-
-
     pthread_exit(NULL);
 }
 
+// Cette fonction effectue le hachage raw, envoie les trois threads qui itèrent le dossier img/, et renvoie le résultat au client.
+// Remarque : exécuté une fois par demande de client. Parfois plusieurs fois par client.
 void compareAndSendResult(int csock, const char *raw_image_data, size_t raw_image_size, int totalImages) {
     uint64_t raw_hash;
-    
+
     if (!PHashRaw(raw_image_data, raw_image_size, &raw_hash)) {
         fprintf(stderr, "Error hashing raw image\n");
         return;
     }
     printf("Raw hash value: %ld\n", raw_hash);
 
+    // Reset global variables
+    bestDistance = DISTANCE_THRESHOLD;
+    memset(bestImage, 0, sizeof(bestImage));
+
     int imagesPerThread = totalImages / THREAD_COUNT;
     int remainingImages = totalImages % THREAD_COUNT;
-    
 
     pthread_t processThreads[THREAD_COUNT];
     ThreadArgs threadArgs[THREAD_COUNT];
 
     for (int i = 0; i < THREAD_COUNT; ++i) {
-		threadArgs[i].rawHash = raw_hash;
+        threadArgs[i].rawHash = raw_hash;
         threadArgs[i].threadIndex = i;
         threadArgs[i].totalImages = imagesPerThread + (i < remainingImages ? 1 : 0);
-        threadArgs[i].csock = csock;
+        threadArgs[i].localBestDistance = DISTANCE_THRESHOLD;
 
         pthread_create(&processThreads[i], NULL, imageProcessingThread, &threadArgs[i]);
     }
 
     for (int i = 0; i < THREAD_COUNT; ++i) {
         pthread_join(processThreads[i], NULL);
-        printf("Process thread %d joined\n", i);
+
+        // Update the global best result
+        if (threadArgs[i].localBestDistance < bestDistance) {
+            bestDistance = threadArgs[i].localBestDistance;
+            strcpy(bestImage, threadArgs[i].localBestImage);
+        }
     }
 
-    // Send the best result to the client
-    printf("Sending result to client\n"); 
-
+    if (bestDistance < DISTANCE_THRESHOLD) {
+        printf("Min distance found\n");
+        char resultMessage[MAX_SIZE];
+        snprintf(resultMessage, sizeof(resultMessage), "Most similar image found: '%s' with a distance of %d.\n", bestImage, bestDistance);
+        send(csock, resultMessage, strlen(resultMessage), 0);
+    } else {
+        const char *noSimilarImageMessage = "No similar image found (no comparison could be performed successfully).\n";
+        send(csock, noSimilarImageMessage, strlen(noSimilarImageMessage), 0);
+    }
 }
-
 
 // Fonction pour compter le nombre d'images dans le répertoire
 int countImagesInDirectory(const char *directory) {
@@ -148,26 +142,39 @@ int countImagesInDirectory(const char *directory) {
     return count;
 }
 
-// Fonction pour traiter chaque client
+// Fonction pour traiter chaque client.
+// Remarque : est exécuté une fois par client jusqu'à arrêt du client
 void *clientHandler(void *arg) {
     int csock = *((int *)arg);
 
-    // Receive the image from the client
-    char buffer[MAX_SIZE];
-    ssize_t bytesRead = recv(csock, buffer, sizeof(buffer), 0);
-    if (bytesRead > 0) {
-        buffer[bytesRead] = '\0';
-        // Perform image comparison and send result to the client
+    // Set up a signal handler for SIGINT
+    struct sigaction sa;
+    sa.sa_handler = handleSignal;
+    sigaction(SIGINT, &sa, NULL);
+
+    while (1) {
+        // Receive the image from the client
+        char buffer[MAX_SIZE];
+        ssize_t bytesRead = recv(csock, buffer, sizeof(buffer), 0);
+
+        if (bytesRead <= 0) {
+            // Handle error or connection closed
+            break;
+        }
+
         printf("Comparing and sending result\n");
         compareAndSendResult(csock, buffer, bytesRead, countImagesInDirectory("img/"));
     }
 
-    // Close the client socket
+    // Close the client socket when done
     close(csock);
 
     pthread_exit(NULL);
 }
 
+
+// Etablissement de connexion clinet-serveur.
+// Remarque : un socket serveur par client. 
 int main(void) {
     signal(SIGINT, handleSignal);
 
@@ -215,18 +222,16 @@ int main(void) {
 
         printf("Client connected with socket %d from %s:%d\n", csock, inet_ntoa(csin.sin_addr), ntohs(csin.sin_port));
 
-        // Créer un thread pour gérer le client
+        // Créer un thread pour gérer le client. Remarque : un thread par client
         pthread_t clientThread;
         int *clientSockPtr = malloc(sizeof(int));
         *clientSockPtr = csock;
         
-        printf("ABOUT TO CREATE CLIENT THREAD\n");
         if (pthread_create(&clientThread, NULL, clientHandler, (void *)clientSockPtr) != 0) {
             perror("Error creating client thread");
             close(csock);
             free(clientSockPtr);
         } else {
-			printf("THREAD CREATED \n");
             pthread_detach(clientThread);
         }
     }
